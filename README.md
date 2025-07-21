@@ -18,7 +18,7 @@ This project presents a time series forecasting model for Kenya's 2025 inflation
 
 
 ##  Live Preview
-> [View Project](https://github.com/Kibunywasam/statistical_project/blob/main/Inflation-forecast(kenya).Rmd)
+> [View Project](https://github.com/Kibunywasam/Projects/blob/main/Inflation-forecast(kenya).Rmd)
 
 ##  What I Learned
 - Real-world implementation of time series models  
