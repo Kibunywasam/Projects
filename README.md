@@ -15,7 +15,7 @@ This project presents a time series forecasting model for Kenya's 2025 inflation
   - Confidence ribbon (80% interval) from Jan–Dec 2025  
   - Policy benchmark cards with threshold indicators  
   - Timeline view of predicted vs actual CPI movement  
-- **Recruiter Relevance**: Tailored visual storytelling for non-technical stakeholders, with hover-to-explain features and clean layout
+
 
 ##  Live Preview
 > [View Project](https://github.com/Kibunywasam/statistical_project/blob/main/Inflation-forecast(kenya).Rmd)
