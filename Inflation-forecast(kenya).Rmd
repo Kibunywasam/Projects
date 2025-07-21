@@ -1,0 +1,439 @@
+---
+title: "FORECASTING THE INFLATION RATES IN KENYA"
+author: "KIBUNYWA SAMUEL"
+date: "`r Sys.Date()`"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(readxl)
+Inflation_dataset <- read_excel("C:/Users/Wintham/Desktop/Sir_ME/Inflation data(1).xlsx")
+head(Inflation_dataset)
+```
+
+
+# 1) DATA PRE-PROCESSING
+
+
+```{r}
+colnames(Inflation_dataset)
+```
+```{r}
+colSums(is.na(Inflation_dataset))
+
+```
+```{r}
+library(dplyr)
+
+# Renaming necessary columns
+renamed <- Inflation_dataset %>%
+  rename(
+    inflation_rate = `12-Month Inflation`,
+    date = `Imported date`
+  )
+
+# Identifying and dropping columns full of NAs and other columns
+cleaned_data <- renamed %>%
+  select(where(~ !all(is.na(.)))) %>%     # Removes columns that are ALL NA
+  select(c(inflation_rate, date)) %>%
+  mutate(date = as.Date(date, origin = "1899-12-30")) %>%         #formatting the date
+  arrange(date)# Sort in ascending order
+
+
+head(cleaned_data)
+
+```
+```{r}
+# Checking and removing duplicate rows
+
+if (any(duplicated(cleaned_data))) {
+  cat("Duplicate rows detected. Cleaning them up...\n")
+  clean_data <- cleaned_data[!duplicated(cleaned_data), ]
+  
+} else {
+  cat("No duplicate rows found.\n")
+  clean_data <- cleaned_data
+}
+
+train_data <- clean_data %>%
+  filter(date <= as.Date("2024-12-01"))
+
+tail(train_data)
+
+
+```
+
+
+# 2) EXPLORATORY DATA ANALYSIS(EDA)
+
+
+```{r}
+library(ggplot2)
+
+ggplot(clean_data, aes(x = date, y = inflation_rate)) +
+  geom_line(color = "steelblue") +
+  labs(title = "Monthly Inflation Rate (Kenya)",
+       x = "Date",
+       y = "Inflation Rate (%)") +
+  theme_minimal()
+
+```
+
+```{r}
+
+ggplot(clean_data, aes(x = inflation_rate)) +
+  geom_histogram(binwidth = 1, fill = "steelblue", color = "white") +
+  labs(title = "Distribution of Monthly Inflation Rates",
+       x = "Inflation Rate (%)",
+       y = "Frequency") +
+  theme_minimal()
+
+```
+
+```{r}
+
+ggplot(clean_data, aes(y = inflation_rate)) +
+  geom_boxplot(fill = "steelblue", color = "black") +
+  labs(title = "Boxplot of Monthly Inflation Rates",
+       y = "Inflation Rate (%)") +
+  theme_minimal()
+
+```
+
+
+```{r}
+
+ggplot(clean_data, aes(x = "", y = inflation_rate)) +
+  geom_boxplot(fill = "lightblue") +
+  geom_jitter(aes(color = date), width = 0.1, alpha = 0.6) +
+  labs(title = "Boxplot of Monthly Inflation Rates",
+       y = "Inflation Rate (%)") +
+  theme_minimal()
+
+```
+
+```{r}
+# Calculate IQR bounds
+Q1 <- quantile(clean_data$inflation_rate, 0.25)
+Q3 <- quantile(clean_data$inflation_rate, 0.75)
+IQR_val <- Q3 - Q1
+
+lower_bound <- Q1 - 1.5 * IQR_val
+upper_bound <- Q3 + 1.5 * IQR_val
+
+# Filter and label outliers with direction
+outlier_months <- clean_data %>%
+  filter(inflation_rate < lower_bound | inflation_rate > upper_bound) %>%
+  mutate(outlier_type = ifelse(inflation_rate < lower_bound, "Low", "High"))
+
+print(outlier_months)
+
+
+```
+# I decided to keep the outliers because I assumed they represent meaningful economic events: such as global oil prices spiked, or local taxes shifted
+
+# For example, in year 2008, 9 of 12 months had very high inflation rates 
+
+# This might have been a result of the 2007 post-election violence
+
+# AND 2011 rates might have been influenced by the 2010 constitution ammendment.
+
+# It is also good to note all the outliers were all high
+
+```{r}
+
+train_data$outlier_dummy <- ifelse(train_data$date %in% outlier_months$date, 1, 0)
+head(train_data)
+
+```
+
+
+# 3) MODEL BUILDING
+
+
+```{r}
+ts_data <- ts(train_data$inflation_rate, start = c(2005, 1), frequency = 12)
+ts_data
+
+```
+
+
+```{r}
+# Plot all components
+decomp <- decompose(ts_data)
+plot(decomp)
+
+```
+```{r}
+plot(decomp$seasonal)
+```
+
+
+# LOG TRANSFORMATION
+
+# Stabilizes variance: When data has bigger swings as values increase, logging tames the volatility.
+
+# Linearizes exponential growth: If inflation is rising faster and faster, logs make it appear more linear.
+
+# Turns multiplicative seasonality into additive: This helps methods like decomposition or SARIMA, which assume additive components.
+
+# when inflation rates rise rapidly, they tend to have multiplicative seasonality
+
+```{r}
+log_ts <- log(ts_data)
+decompp <- decompose(log_ts)
+plot(decompp)
+
+```
+```{r}
+plot(decompp$seasonal)
+```
+
+
+```{r}
+#install.packages("tseries")
+
+library(tseries)
+adf.test(log_ts)
+
+cat("-----------------------------------")
+
+library(urca)
+kpss_test <- ur.kpss(log_ts, type = "tau")
+summary(kpss_test)
+
+```
+# Te p-value (0.01) is less than 0.05
+# We reject the null hypothesis
+# Our data is stationary and no differencing is required.
+
+# KPSS confirms that it's not trend-stationary, it’s just outright stationary
+# All critical values (even 10%) are above the test statistic
+
+# Combined, both tests gives a high confidence that no differencing is needed (d = 0)
+
+
+```{r}
+#install.packages('forecast')
+
+library(forecast)
+findfrequency(ts_data)
+
+findfrequency(log_ts)
+```
+
+# 33 indicates repeated patterns are very strong at 33 months intervals.
+
+# This indicates presence of cyclic patterns in our data [good for time series]
+
+# Cycles often contain real signal that ARIMA or SARIMA models are meant to capture through autoregressive or moving average terms.
+
+# If a cycle isn't perfectly regular like seasonality, differencing may weaken it, even though it won't erase it completely.
+
+# This sets our seasonal differencing D to zero
+
+
+
+```{r}
+# install.packages("uroot")
+
+#ndiffs(ts_data)     # should be 0
+
+nsdiffs(log_ts)    # may return 1 if strong seasonality
+nsdiffs(log_ts, test = "ch") 
+```
+# The zero values indicate that NO seasonal differencing is necessary
+
+```{r}
+acf(log_ts, lag.max = 75, main = "ACF of Inflation Rate")
+
+```
+
+
+```{r}
+pacf(log_ts, lag.max = 75, main = "PACF of Inflation Rate")
+
+```
+
+
+```{r}
+manual_fit <- Arima(log_ts, order = c(2,0,0),
+             seasonal = list(order = c(1,0,2), period = 12),
+             xreg = train_data$outlier_dummy)
+
+summary(manual_fit)
+
+
+```
+
+```{r}
+checkresiduals(manual_fit, lag = 48)
+
+```
+
+```{r}
+library(forecast)
+
+auto_fit <- auto.arima(ts_data)
+
+summary(auto_fit)
+
+```
+```{r}
+checkresiduals(auto_fit, lag = 48)
+```
+
+
+
+
+# Both the manually fitted and the auto fitted models exhibit residual ACF plots that cut off immediately, indicating that non-seasonal autocorrelation has been   effectively addressed
+
+# In addition, histograms with overlaid normal density curves for both models show that the residuals are approximately symmetric and bell-shaped,    supporting the assumption of normality.
+
+# However, despite visual similarities,  AIC and BIC values are substantially lower for the manually fitted (manual_fit), indicating a model that balances complexity and goodness-of-fit more effectively.
+
+# Lower values mean the model explains the data well while remaining efficient.
+
+# Our manually fitted model seems to be the best choice
+
+```{r}
+Box.test(residuals(manual_fit), type = "Ljung-Box")
+
+```
+# The null hypothesis of the Box-Ljung test is that there is no autocorrelation in the residuals at lag 1.
+
+# A high p-value (0.7299) suggests we do not reject the null hypothesis.
+
+# so: There's no significant autocorrelation in our residuals, indicating that our model residuals behave like white noise, 
+
+```{r}
+# Forecasting next 12 months
+library(forecast)
+
+future_dummy <- rep(0, 12)
+
+inflation_forecast <- forecast(manual_fit, xreg = future_dummy, h = 12)
+inflation_forecast
+
+
+```
+
+
+```{r}
+forecast_df <- as.data.frame(inflation_forecast)
+
+
+forecast_df_transformed <- data.frame(
+  Month = seq(from = as.Date("2025-01-01"), by = "month", length.out = 12),
+  Point_Forecast = exp(forecast_df$`Point Forecast`),
+  Lo_80 = exp(forecast_df$`Lo 80`),
+  Hi_80 = exp(forecast_df$`Hi 80`),
+  Lo_95 = exp(forecast_df$`Lo 95`),
+  Hi_95 = exp(forecast_df$`Hi 95`)
+)
+
+
+print(forecast_df_transformed, row.names = FALSE)
+
+```
+
+
+```{r}
+library(ggplot2)
+
+ggplot(forecast_df_transformed, aes(x = Month)) +
+  geom_ribbon(aes(ymin = Lo_95, ymax = Hi_95), fill = "lightblue", alpha = 0.5) +
+  geom_ribbon(aes(ymin = Lo_80, ymax = Hi_80), fill = "skyblue", alpha = 0.6) +
+  geom_line(aes(y = Point_Forecast), color = "blue4", linewidth = 1.2) +
+  labs(
+    title = "12-Month Inflation Rate Forecast (Original Scale)",
+    x = "Month",
+    y = "Inflation Rate"
+  ) +
+  theme_minimal()
+
+```
+
+
+# 4) MODEL EVALUATION
+
+```{r}
+
+test_data <- clean_data %>%
+  filter(date >= as.Date("2025-01-01"))
+
+head(test_data)
+```
+
+
+
+
+```{r}
+
+test_2025_clean <- test_data %>%
+  rename(actual = `inflation_rate`)
+
+comparison_df <- forecast_df_transformed %>%
+  select(date = Month, forecast = Point_Forecast, Lo_95, Hi_95) %>%
+  inner_join(test_2025_clean, by = "date")
+
+head(comparison_df)
+
+```
+
+
+```{r}
+#install.packages("Metrics")
+library(Metrics)
+
+rmse_val <- rmse(comparison_df$actual, comparison_df$forecast)
+mae_val  <- mae(comparison_df$actual, comparison_df$forecast)
+mape_val <- mape(comparison_df$actual, comparison_df$forecast) * 100
+
+cat(
+  " Model Performance Summary\n",
+  "——————————————\n",
+  " RMSE  = ", round(rmse_val, 2), 
+  "\n The model’s average prediction error is ±", round(rmse_val, 2), " percentage points.\n",
+  "\n MAE   = ", round(mae_val, 2), 
+  "\n On average, forecasts deviate by ", round(mae_val, 2), " points from actual inflation.\n",
+  "\n MAPE  = ", round(mape_val, 2), "%", 
+  " \n Forecasts are within ", 100 - round(mape_val, 2), "% of actual values, on average.\n"
+)
+
+```
+
+
+```{r}
+within_interval <- with(comparison_df, actual >= Lo_95 & actual <= Hi_95)
+coverage_rate <- mean(within_interval) * 100
+
+cat("Interval coverage rate:", round(coverage_rate, 1), "%\n")
+
+```
+# Interval coverage rate: 100 %
+
+# The forecasted values completely lies within the 95% confidence intervals
+
+# THE MODEL PERFORMED EXCELLENTLY!!
+
+
+# 5) MODEL DEPLOYMENT
+
+```{r}
+
+forecasted <- forecast_df_transformed%>%
+  filter(Month > as.Date("2025-05-01"))
+forecasted
+```
+
+
+# Between June and December 2025, Kenya’s inflation rate is forecasted to follow an upward trend, rising from 4.58% in June to a peak of approximately 7.86% in November. 
+
+# The widening confidence intervals in later months—particularly the 95% bounds reaching up to 17.83%—signal increasing uncertainty due to long-term volatility or potential shocks. 
+
+# For instance, the July forecast suggests an inflation rate of 5.67%, but with a 95% confidence range spanning from 2.66% to 12.08%, underscoring the importance of cautious policy interpretation and scenario planning
